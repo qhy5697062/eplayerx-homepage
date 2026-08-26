@@ -149,7 +149,10 @@ export async function tmdbCacheMiddleware(c: Context, next: () => Promise<void>)
   }
 
   const cache = defaultCache();
-  const cacheKey = new Request(`${c.req.url}#${TMDB_CACHE_EPOCH}`, {
+  const epoch = tmdbApiPath(c.req.path) === "/tv/season/details"
+    ? "20260826-season-aggregate-credits"
+    : TMDB_CACHE_EPOCH;
+  const cacheKey = new Request(`${c.req.url}#${epoch}`, {
     method: "GET",
   });
   if (cache) {
@@ -675,6 +678,7 @@ tmdbApp.get("/tv/season/details", async (c) => {
       params: {
         query: {
           language,
+          append_to_response: "aggregate_credits",
         },
         path: {
           series_id: Number(id),
