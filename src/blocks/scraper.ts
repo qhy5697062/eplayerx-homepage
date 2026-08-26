@@ -7,7 +7,10 @@
  * that mirrors the crawler output the client already decodes.
  */
 
-import { pickPreferredLogo } from "../crawler/tmdb-enrich.js";
+import {
+	originLanguage,
+	pickPreferredLogo,
+} from "../crawler/tmdb-enrich.js";
 import type { MediaType, ScrapeOptions, SnapshotItem } from "./types.js";
 
 const TMDB_BASE =
@@ -43,6 +46,8 @@ interface RawItem {
 	release_date?: string | null;
 	first_air_date?: string | null;
 	overview?: string | null;
+	original_language?: string | null;
+	origin_country?: string[];
 	thumb?: string | null;
 	logo?: string | null;
 	noLogoPoster?: string | null;
@@ -99,6 +104,8 @@ function normalize(raw: RawItem, mediaType: MediaType): SnapshotItem | null {
 		release_date: raw.release_date ?? null,
 		first_air_date: raw.first_air_date ?? null,
 		overview: raw.overview ?? null,
+		original_language: raw.original_language ?? null,
+		origin_country: raw.origin_country,
 		thumb: raw.thumb ?? raw.backdrop_path ?? raw.poster_path ?? null,
 		logo: raw.logo ?? null,
 		noLogoPoster: raw.noLogoPoster ?? null,
@@ -176,7 +183,12 @@ async function enrichItem(
 
 		const logos = images.logos ?? [];
 		const logo =
-			pickPreferredLogo(logos, languageCode)?.file_path ?? null;
+			pickPreferredLogo(
+				logos,
+				languageCode,
+				undefined,
+				originLanguage(item.original_language, item.origin_country),
+			)?.file_path ?? null;
 
 		const posters = images.posters ?? [];
 		// No textless poster available: fall back to the regular poster so

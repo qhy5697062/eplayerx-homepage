@@ -39,6 +39,8 @@ export interface TmdbSearchResult {
 	release_date?: string | null;
 	first_air_date?: string | null;
 	overview?: string | null;
+	original_language?: string | null;
+	origin_country?: string[];
 }
 
 export interface ImageMeta {
@@ -64,6 +66,7 @@ interface TmdbDetailsPayload extends TmdbSearchResult {
 	tvdb_id?: unknown;
 	external_ids?: { imdb_id?: unknown; tvdb_id?: unknown };
 	images?: TmdbImagesPayload;
+	production_countries?: { iso_3166_1?: string }[];
 }
 
 function normalizeImdbId(value: unknown): string | null {
@@ -106,6 +109,8 @@ function imageMetaFromImagesPayload(
 	language: string,
 	backdropPath?: string | null,
 	posterPath?: string | null,
+	originalLanguage?: string | null,
+	originCountries?: string[] | null,
 ): ImageMeta {
 	const fallback: ImageMeta = {
 		thumb: backdropPath || posterPath || null,
@@ -130,7 +135,13 @@ function imageMetaFromImagesPayload(
 		null;
 
 	const logos = images.logos ?? [];
-	const logo = pickPreferredLogo(logos, languageCode, preferredRegion)?.file_path ?? null;
+	const logo =
+		pickPreferredLogo(
+			logos,
+			languageCode,
+			preferredRegion,
+			originLanguage(originalLanguage, originCountries),
+		)?.file_path ?? null;
 
 	const posters = images.posters ?? [];
 	const noLogoPoster =
@@ -169,29 +180,101 @@ function isLandscapeLogo(logo: ImageEntry): boolean {
 	return logoAspectRatio(logo) > 1;
 }
 
-/** Prefer a wide wordmark that fits the carousel / hero overlay. */
+const ORIGIN_COUNTRY_LANGUAGES: Record<string, string> = {
+	US: "en",
+	GB: "en",
+	AU: "en",
+	NZ: "en",
+	IE: "en",
+	CA: "en",
+	JP: "ja",
+	KR: "ko",
+	CN: "zh",
+	TW: "zh",
+	HK: "zh",
+	MO: "zh",
+	FR: "fr",
+	DE: "de",
+	ES: "es",
+	MX: "es",
+	AR: "es",
+	IT: "it",
+	BR: "pt",
+	PT: "pt",
+	RU: "ru",
+	NL: "nl",
+	SE: "sv",
+	NO: "no",
+	DK: "da",
+	FI: "fi",
+	PL: "pl",
+	TR: "tr",
+	TH: "th",
+};
+
+function primaryLanguageCode(raw?: string | null): string | undefined {
+	if (!raw) return undefined;
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	return trimmed.replaceAll("_", "-").split("-")[0]?.toLowerCase();
+}
+
+/** TMDB `original_language`, or a language inferred from origin country. */
+export function originLanguage(
+	originalLanguage?: string | null,
+	originCountries?: string[] | null,
+): string | undefined {
+	const fromTitle = primaryLanguageCode(originalLanguage);
+	if (fromTitle) return fromTitle;
+	for (const country of originCountries ?? []) {
+		const mapped = ORIGIN_COUNTRY_LANGUAGES[country.trim().toUpperCase()];
+		if (mapped) return mapped;
+	}
+	return undefined;
+}
+
+function logoLanguageCode(logo: ImageEntry): string | undefined {
+	return primaryLanguageCode(logo.iso_639_1);
+}
+
+/** App language, then original / origin-country language. Never a random translation. */
 export function pickPreferredLogo(
 	logos: ImageEntry[],
 	languageCode: string,
 	preferredRegion?: string,
+	originalLanguage?: string,
 ): ImageEntry | undefined {
 	if (!logos.length) return undefined;
-	const regionMatches = preferredRegion
-		? logos.filter(
-				(l) =>
-					l.iso_639_1 === languageCode && l.iso_3166_1 === preferredRegion,
-			)
-		: [];
-	const langMatches = logos.filter((l) => l.iso_639_1 === languageCode);
+	const appLanguage = primaryLanguageCode(languageCode) ?? "en";
+	const original = primaryLanguageCode(originalLanguage);
 	const landscape = (items: ImageEntry[]) => items.filter(isLandscapeLogo);
-	return (
-		bestByVote(landscape(regionMatches)) ??
-		bestByVote(landscape(langMatches)) ??
-		bestByVote(landscape(logos)) ??
-		bestByVote(regionMatches) ??
-		bestByVote(langMatches) ??
-		bestByVote(logos)
-	);
+	const matching = (language: string | undefined) =>
+		logos.filter((logo) => logoLanguageCode(logo) === language);
+	const pick = (items: ImageEntry[]) =>
+		bestByVote(landscape(items)) ?? bestByVote(items);
+
+	if (appLanguage === "zh" && preferredRegion) {
+		const regionMatches = logos.filter(
+			(logo) =>
+				logoLanguageCode(logo) === "zh" && logo.iso_3166_1 === preferredRegion,
+		);
+		const regionHit = pick(regionMatches);
+		if (regionHit) return regionHit;
+	}
+
+	const languages: Array<string | undefined> = [appLanguage];
+	if (original && original !== appLanguage) languages.push(original);
+	languages.push(undefined);
+
+	const seen = new Set<string>();
+	for (const language of languages) {
+		const key = language ?? "";
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const hit = pick(matching(language));
+		if (hit) return hit;
+	}
+	return undefined;
 }
 
 export async function searchTMDB(
@@ -258,6 +341,8 @@ export async function fetchImageMeta(
 	posterPath?: string | null,
 	language = "zh-CN",
 	client: TmdbClient = tmdb,
+	originalLanguage?: string | null,
+	originCountries?: string[] | null,
 ): Promise<ImageMeta> {
 	const fallback: ImageMeta = {
 		thumb: backdropPath || posterPath || null,
@@ -280,6 +365,8 @@ export async function fetchImageMeta(
 			language,
 			backdropPath,
 			posterPath,
+			originalLanguage,
+			originCountries,
 		);
 	} catch (error) {
 		console.error(`Failed to fetch images for ${mediaType}/${tmdbId}:`, error);
@@ -324,31 +411,34 @@ export async function fetchDetailsWithEnrichment(
 	mediaType: "movie" | "tv",
 	language: string | undefined,
 	client: TmdbClient = tmdb,
+	originalLanguage?: string | null,
 ): Promise<{
 	tmdbData: TmdbSearchResult;
 	externalIds: ExternalIds;
 	imageMeta: ImageMeta;
 } | null> {
 	const lang = language ?? "zh-CN";
-	// language filters appended images; include en + null so thumb/logo
-	// fallbacks in imageMetaFromImagesPayload can actually see them.
 	const langCode = lang.split("-")[0] || "zh";
-	const includeImageLanguage = [...new Set([langCode, "en", "null"])].join(
-		",",
-	);
+	const origin = originLanguage(originalLanguage);
 	try {
 		// include_image_language is valid with append_to_response=images but
-		// missing from the generated details OpenAPI query types.
-		const query = {
+		// missing from the generated details OpenAPI query types. If origin
+		// is unknown, omit the filter so the same details response still
+		// contains origin-language logos.
+		const query: {
+			language: string;
+			append_to_response: string;
+			include_image_language?: string;
+		} = {
 			language: lang,
 			append_to_response:
 				mediaType === "tv" ? "external_ids,images" : "images",
-			include_image_language: includeImageLanguage,
-		} as {
-			language: string;
-			append_to_response: string;
-			include_image_language: string;
 		};
+		if (origin) {
+			query.include_image_language = [...new Set([langCode, origin, "null"])].join(
+				",",
+			);
+		}
 		const result =
 			mediaType === "movie"
 				? await client.GET(`/3/movie/${tmdbId}`, {
@@ -371,6 +461,11 @@ export async function fetchDetailsWithEnrichment(
 				lang,
 				data.backdrop_path,
 				data.poster_path,
+				data.original_language ?? originalLanguage,
+				[
+					...(data.origin_country ?? []),
+					...(data.production_countries?.map((c) => c.iso_3166_1 ?? "") ?? []),
+				],
 			),
 		};
 	} catch (error) {

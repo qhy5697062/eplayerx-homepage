@@ -1,12 +1,15 @@
 import { Hono, type Context } from "hono";
-import { pickPreferredLogo } from "../crawler/tmdb-enrich.js";
+import {
+  originLanguage,
+  pickPreferredLogo,
+} from "../crawler/tmdb-enrich.js";
 import { cachedRatings, getRatingsCache } from "../ratings/cache.js";
 import { tmdb } from "./client.js";
 
 const tmdbApp = new Hono();
 
-/** Bump to drop Cache API entries after discover filter / artwork changes. */
-const TMDB_CACHE_EPOCH = "20260822-discover-artwork";
+/** Bump to drop Cache API entries after cached response-shape changes. */
+const TMDB_CACHE_EPOCH = "20260824-logo-origin-language";
 
 const TMDB_IMAGE_CACHE_CONTROL =
   "public, max-age=31536000, s-maxage=31536000, immutable";
@@ -881,8 +884,15 @@ async function enrichWithImages(
       const images = imagesResult.data;
 
       const logos = (images?.logos ?? []) as ImageEntry[];
-      const logo = pickPreferredLogo(logos, languageCode, preferredRegion)
-        ?.file_path;
+      const logo = pickPreferredLogo(
+        logos,
+        languageCode,
+        preferredRegion,
+        originLanguage(
+          item.original_language as string | undefined,
+          item.origin_country as string[] | undefined,
+        ),
+      )?.file_path;
 
       const posters = (images?.posters ?? []) as ImageEntry[];
       const noLogoPoster = bestByVote(

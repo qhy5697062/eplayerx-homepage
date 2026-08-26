@@ -76,6 +76,8 @@ export interface SnapshotItem {
 	release_date?: string | null;
 	first_air_date?: string | null;
 	overview?: string | null;
+	original_language?: string | null;
+	origin_country?: string[];
 	thumb?: string | null;
 	logo?: string | null;
 	noLogoPoster?: string | null;

@@ -3,6 +3,7 @@
  */
 
 import { cachedRatings, getRatingsCache } from "../ratings/cache.js";
+import { tmdb } from "../tmdb/client.js";
 import { fetchBangumiHotAnime } from "./bangumi-scraper.js";
 import {
 	fetchDoubanHotAnimation,
@@ -90,7 +91,13 @@ async function buildContentItem(
 	const tmdbId = tmdbData.id;
 	if (!tmdbId) return null;
 
-	const enriched = await fetchDetailsWithEnrichment(tmdbId, mediaType, "zh-CN");
+	const enriched = await fetchDetailsWithEnrichment(
+		tmdbId,
+		mediaType,
+		"zh-CN",
+		tmdb,
+		tmdbData.original_language,
+	);
 	const data = enriched?.tmdbData ?? tmdbData;
 	const externalIds = enriched?.externalIds ?? { imdbId: null, tvdbId: null };
 	const imageMeta = enriched?.imageMeta ?? {
@@ -107,6 +114,8 @@ async function buildContentItem(
 				tmdbId,
 				mediaType,
 				language,
+				tmdb,
+				tmdbData.original_language,
 			);
 			if (!localized) continue;
 			const translation = translationFromEnrichment(localized);

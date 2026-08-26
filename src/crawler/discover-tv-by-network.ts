@@ -111,7 +111,10 @@ async function fetchTVByNetwork(
         "tv",
         tv.backdrop_path,
         tv.poster_path,
-        "zh-CN"
+        "zh-CN",
+        tmdb,
+        (tv as { original_language?: string }).original_language,
+        (tv as { origin_country?: string[] }).origin_country,
       );
 
       return {
